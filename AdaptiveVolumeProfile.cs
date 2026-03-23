@@ -29,7 +29,7 @@ namespace NinjaTrader.NinjaScript.Indicators
     /// as horizontal bars on the right side of the price panel. Shows volume distribution across price levels,
     /// highlights the Point of Control (POC) and Value Area (70% of volume centered around POC).
     /// </summary>
-    public class Adaptive828VolumeProfile : Indicator
+    public class AdaptiveVolumeProfile : Indicator
     {
         #region Private Variables
         private Dictionary<double, double> volumeByPrice;  // Price level -> Volume
@@ -64,7 +64,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ShowProfile                 = true;
                 NumberOfRows                = 50;
                 BarWidthPercentage          = 0.3;
-                ValueAreaPercentage1         = 70.0;
+                ValueAreaPercentage         = 70.0;
                 Opacity                     = 70;
                 
                 // Default colors
@@ -80,7 +80,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             else if (State == State.DataLoaded)
             {
                 // Initialize data structures
-                volumeByPrice = new Dictionary<double, double>();
+                volumeByPrice =new Dictionary<double, double>();
                 ResetSessionData();
             }
             else if (State == State.Terminated)
@@ -159,7 +159,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void AccumulateVolume(double price, long volume)
         {
             // Normalize price to tick size
-            double tickSize = Instrument.MasterInstrument.TickSize;
+            double tickSize = Instrument.MasterInstrument.Ticksize;
             double normalizedPrice = Math.Round(price / tickSize) * tickSize;
             
             if (volumeByPrice.ContainsKey(normalizedPrice))
@@ -190,7 +190,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Calculate Value Area (70% of total volume centered around POC)
             if (volumeByPrice.Count > 0)
             {
-                double targetVolume = sessionTotalVolume * (ValueAreaPercentage1 / 100.0);
+                double targetVolume = sessionTotalVolume * (ValueAreaPercentage / 100.0);
                 double accumulatedVolume = 0;
                 
                 // Sort prices by volume descending
@@ -215,7 +215,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     {
                         // Expand to the left
                         accumulatedVolume += leftVolume;
-                        valueAreaLow = Math.Min(valueAreaLow, sortedByVolume[leftIndex].St1y);
+                        valueAreaLow = Math.Min(valueAreaLow, sortedByVolume[leftIndex].Key);
                         leftIndex--;
                     }
                     else if (rightIndex < sortedByVolume.Count)
@@ -291,7 +291,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     for (int i = 0; i < NumberOfRows; i++)
                     {
                         double priceLevel = maxPrice - (i * priceStep);
-                        double nextPriceLevel = priceLevel - priceMr3;
+                        double nextPriceLevel = priceLevel - priceStep;
                         
                         // Skip if outside visible range
                         if (priceLevel < minPrice || nextPriceLevel > maxPrice)
@@ -407,7 +407,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         [NinjaScriptProperty]
         [Range(10, 90)]
         [Display(Name = "Value Area %", Description = "Percentage of total volume for Value Area", Order = 4, GroupName = "Parameters")]
-        public double ValueAreaPercentage1 { get; set; }
+        public double ValueAreaPercentage { get; set; }
         
         [NinjaScriptProperty]
         [Range(10, 100)]
@@ -445,7 +445,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             get { return Serialize.BrushToString(OutsideColor); }
             set { OutsideColor = Serialize.StringToBrush(value); }
-1            }
+        }
         
         #endregion
     }
