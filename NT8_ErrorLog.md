@@ -126,8 +126,21 @@ Use Calculate.OnEachTick, accumulate from Volume[0] each tick
 Never use both simultaneously
 Models affected: Grok Code Fast 1
 
-ERROR 17 — Value Area regression to split-volume approach
-ERROR 18 — ToDxColor4 and brush creation regressions in v2
+ERROR 17:
+Issue: Value Area algorithm regressed to split-volume approach
+Symptom: VAH and VAL calculated incorrectly, splits total volume 
+in half from each end instead of expanding from POC outward
+Fix: Always use price-level expansion algorithm from POC outward
+comparing volume above vs below at each step
+Models affected: Grok Code Fast 1 v2
+
+ERROR 18:
+Issue: ToDxColor4() and brush creation inside OnRender using blocks 
+both regressed in v2 despite being fixed in v1
+Symptom: Compile error on ToDxColor4, performance issue on brush creation
+Fix: Always use ToDxBrush(RenderTarget), always create brushes in 
+OnRenderTargetChanged never inside OnRender
+Models affected: Grok Code Fast 1 v2
 
 ========================================
 END OF ERROR LOG
