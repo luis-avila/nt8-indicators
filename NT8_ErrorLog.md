@@ -142,6 +142,23 @@ Fix: Always use ToDxBrush(RenderTarget), always create brushes in
 OnRenderTargetChanged never inside OnRender
 Models affected: Grok Code Fast 1 v2
 
+ERROR 18 UPDATE:
+Even when brushes are already created in OnRenderTargetChanged 
+as class-level variables, models still create additional 
+temporary brushes inside OnRender using blocks for color 
+selection logic. This is wrong.
+WRONG pattern seen in GPT-5.4 Mini:
+using (var fill = new SolidColorBrush(RenderTarget, ToColor4(chosen)))
+    RenderTarget.FillRectangle(rect, fill);
+CORRECT pattern:
+Use the pre-created class-level brushes directly:
+SolidColorBrush brush = (isPOC) ? pocDxBrush : 
+    (isValueArea) ? valueAreaDxBrush : outsideDxBrush;
+RenderTarget.FillRectangle(rect, brush);
+Never create new brush objects inside OnRender under any 
+circumstances regardless of how color selection is handled.
+Models affected: Grok Code Fast 1 v2, GPT-5.4 Mini
+
 ========================================
 END OF ERROR LOG
 ========================================
