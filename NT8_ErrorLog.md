@@ -183,6 +183,16 @@ groups ticks into dynamic buckets during profile rebuild.
 True fix: store and display raw TickSize normalized prices 
 directly without any grouping logic.
 
+ERROR 21:
+Issue: Incomplete volume profile implementation that attempts
+to use volume from bars in OnMarketData context
+Symptom: Volume[0] does not update in OnMarketData, leading to
+incorrect volume accumulation
+Fix: Properly separate logic between OnMarketData for individual 
+tick data and OnBarUpdate for session resetting
+Never use Volume[0] in OnMarketData, only use MarketDataEventArgs
+Models affected: Qwen3 Coder Plus initial implementation
+
 ========================================
 END OF ERROR LOG
 ========================================
