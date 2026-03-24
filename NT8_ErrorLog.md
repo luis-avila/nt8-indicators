@@ -176,6 +176,13 @@ Math.Round(price / TickSize) * TickSize
 Never calculate dynamic step sizes based on price range
 Models affected: GPT-5.4 Mini, Grok Code Fast 1 multiple versions
 
+ERROR 20 UPDATE:
+Dynamic bucketing persisted even after fix attempt.
+Model correctly normalized price on input but still 
+groups ticks into dynamic buckets during profile rebuild.
+True fix: store and display raw TickSize normalized prices 
+directly without any grouping logic.
+
 ========================================
 END OF ERROR LOG
 ========================================
