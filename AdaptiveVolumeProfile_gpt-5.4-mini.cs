@@ -4,18 +4,15 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Xml.Serialization;
 using NinjaTrader.Cbi;
+using NinjaTrader.Data;
 using NinjaTrader.Gui;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.Gui.SuperDom;
 using NinjaTrader.Gui.Tools;
-using NinjaTrader.Data;
 using NinjaTrader.NinjaScript;
 using NinjaTrader.Core.FloatingPoint;
 using NinjaTrader.NinjaScript.DrawingTools;
@@ -30,24 +27,18 @@ namespace NinjaTrader.NinjaScript.Indicators
 	{
 		private Dictionary<double, double> volumeByPrice;
 		private List<ProfileRow> profileRows;
-		private bool profileDirty;
-		private bool resourcesInitialized;
-		private double sessionHigh;
-		private double sessionLow;
+		private SharpDX.Direct2D1.Brush pocDxBrush;
+		private SharpDX.Direct2D1.Brush valueAreaDxBrush;
+		private SharpDX.Direct2D1.Brush outsideDxBrush;
+		private SharpDX.Direct2D1.Brush borderDxBrush;
 		private double pocPrice;
 		private double valueAreaLow;
 		private double valueAreaHigh;
 		private double maxVolume;
 		private double totalVolume;
-		private int pocIndex;
-		private int valueAreaLowIndex;
-		private int valueAreaHighIndex;
-		private SharpDX.Direct2D1.Brush pocDxBrush;
-		private SharpDX.Direct2D1.Brush valueAreaDxBrush;
-		private SharpDX.Direct2D1.Brush outsideDxBrush;
-		private SharpDX.Direct2D1.Brush borderDxBrush;
-		private TextFormat textFormat;
+		private bool profileDirty;
 		private bool sessionInitialized;
+		private TextFormat textFormat;
 
 		private struct ProfileRow
 		{
@@ -59,23 +50,24 @@ namespace NinjaTrader.NinjaScript.Indicators
 		{
 			if (State == State.SetDefaults)
 			{
-				Description				= @"Real-time session volume profile rendered with SharpDX.";
-				Name					= "AdaptiveVolumeProfile";
-				Calculate				= Calculate.OnEachTick;
-				IsOverlay				= true;
-				DisplayInDataBox		= false;
-				DrawOnPricePanel		= true;
+				Description = @"Real-time session-only volume profile rendered with SharpDX.";
+				Name = "AdaptiveVolumeProfile";
+				Calculate = Calculate.OnEachTick;
+				IsOverlay = true;
+				DisplayInDataBox = false;
+				DrawOnPricePanel = true;
 				DrawHorizontalGridLines = false;
-				DrawVerticalGridLines	= false;
-				PaintPriceMarkers		= false;
-				ScaleJustification		= ScaleJustification.Right;
+				DrawVerticalGridLines = false;
+				PaintPriceMarkers = false;
+				ScaleJustification = ScaleJustification.Right;
 				IsSuspendedWhileInactive = true;
-				Rows					= 48;
-				ShowProfile				= true;
-				PocBrush				= Brushes.Gold;
-				ValueAreaBrush			= Brushes.DodgerBlue;
-				OutsideBrush			= Brushes.DimGray;
-				BorderBrush				= Brushes.Transparent;
+				Rows = 48;
+				ShowProfile = true;
+				ValueAreaPercentage = 70;
+				PocBrush = Brushes.Gold;
+				ValueAreaBrush = Brushes.DodgerBlue;
+				OutsideBrush = Brushes.DimGray;
+				BorderBrush = Brushes.Transparent;
 			}
 			else if (State == State.DataLoaded)
 			{
@@ -95,49 +87,37 @@ namespace NinjaTrader.NinjaScript.Indicators
 			if (CurrentBar < 0)
 				return;
 
-			if (Bars.IsFirstBarOfSession && !sessionInitialized)
-			{
+			if (Bars.IsFirstBarOfSession)
 				ResetSessionData();
-				sessionInitialized = true;
-			}
-			else if (Bars.IsFirstBarOfSession && CurrentBar > 0)
-			{
-				ResetSessionData();
-			}
 
 			if (Volume[0] <= 0)
 				return;
 
-			double price = Instrument.MasterInstrument.RoundToTickSize(Close[0]);
-			if (!volumeByPrice.ContainsKey(price))
-				volumeByPrice[price] = 0;
-			volumeByPrice[price] += Volume[0];
+			double price = Math.Round(Close[0] / TickSize) * TickSize;
+			if (volumeByPrice.ContainsKey(price))
+				volumeByPrice[price] += Volume[0];
+			else
+				volumeByPrice[price] = Volume[0];
+
 			profileDirty = true;
 		}
 
 		protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
 		{
-			base.OnRender(chartControl, chartScale);
-
 			if (!ShowProfile || chartControl == null || chartScale == null || ChartBars == null || ChartPanel == null || RenderTarget == null)
-				return;
-
-			if (ChartBars.FromIndex < 0 || ChartBars.ToIndex < 0)
 				return;
 
 			try
 			{
 				RebuildProfileIfNeeded();
-
 				if (profileRows == null || profileRows.Count == 0 || maxVolume <= 0)
 					return;
 
-				float panelRight = ChartPanel.X + ChartPanel.Width;
 				float panelTop = ChartPanel.Y;
 				float panelHeight = ChartPanel.Height;
 				float profileWidth = Math.Max(30f, ChartPanel.Width * 0.22f);
-				float xRight = panelRight - 2f;
-				float rowHeight = (float)(panelHeight / profileRows.Count);
+				float xRight = ChartPanel.X + ChartPanel.Width - 2f;
+				float rowHeight = panelHeight / Math.Max(1, profileRows.Count);
 
 				for (int i = 0; i < profileRows.Count; i++)
 				{
@@ -146,18 +126,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 					float yBottom = (i == profileRows.Count - 1) ? panelTop + panelHeight : yTop + rowHeight;
 					float barWidth = (float)(profileWidth * (row.Volume / maxVolume));
 					float xLeft = xRight - barWidth;
-					RectangleF rect = new RectangleF(xLeft, yTop, barWidth, Math.Max(1f, yBottom - yTop - 1f));
+					var rect = new SharpDX.RectangleF(xLeft, yTop, barWidth, Math.Max(1f, yBottom - yTop - 1f));
 
-					SharpDX.Direct2D1.Brush dxBrush = GetRowBrush(row.Price);
+					var dxBrush = GetRowBrush(row.Price);
 					if (dxBrush != null)
 						RenderTarget.FillRectangle(rect, dxBrush);
 
-					if (BorderBrush != Brushes.Transparent && borderDxBrush != null)
+					if (borderDxBrush != null && BorderBrush != Brushes.Transparent)
 						RenderTarget.DrawRectangle(rect, borderDxBrush, 1f);
 				}
 			}
-			catch (Exception)
+			catch (Exception ex)
 			{
+				Log($"AdaptiveVolumeProfile render error: {ex.Message}", LogLevel.Error);
 			}
 		}
 
@@ -172,25 +153,21 @@ namespace NinjaTrader.NinjaScript.Indicators
 			outsideDxBrush = OutsideBrush.ToDxBrush(RenderTarget);
 			borderDxBrush = BorderBrush.ToDxBrush(RenderTarget);
 			textFormat = new TextFormat(Core.Globals.DirectWriteFactory, "Arial", 12f);
-			resourcesInitialized = true;
 		}
 
 		private void ResetSessionData()
 		{
-			if (volumeByPrice == null)
+			if (volumeByPrice == null || profileRows == null)
 				return;
 
 			volumeByPrice.Clear();
 			profileRows.Clear();
-			profileDirty = true;
-			pocPrice = 0;
-			valueAreaLow = 0;
-			valueAreaHigh = 0;
+			pocPrice = double.NaN;
+			valueAreaLow = double.NaN;
+			valueAreaHigh = double.NaN;
 			maxVolume = 0;
 			totalVolume = 0;
-			pocIndex = -1;
-			valueAreaLowIndex = -1;
-			valueAreaHighIndex = -1;
+			profileDirty = true;
 		}
 
 		private void RebuildProfileIfNeeded()
@@ -202,35 +179,37 @@ namespace NinjaTrader.NinjaScript.Indicators
 			maxVolume = 0;
 			totalVolume = 0;
 
-			var ordered = volumeByPrice.Keys.OrderBy(x => x).ToList();
-			if (ordered.Count == 0)
+			var prices = volumeByPrice.Keys.OrderBy(p => p).ToList();
+			if (prices.Count == 0)
 				return;
 
-			double minPrice = ordered.First();
-			double maxPrice = ordered.Last();
-			double span = Math.Max(TickSize, maxPrice - minPrice);
-			double step = Math.Max(TickSize, Instrument.MasterInstrument.RoundToTickSize(span / Math.Max(1, Rows - 1)));
+			double minPrice = prices.First();
+			double maxPrice = prices.Last();
+			double tick = TickSize;
+			double rowStep = tick;
+			int rowCount = Math.Max(1, Rows);
+			double rangeTicks = Math.Max(1, Math.Round((maxPrice - minPrice) / tick) + 1);
+			double ticksPerRow = Math.Max(1, Math.Ceiling(rangeTicks / rowCount));
+			double bucketSize = ticksPerRow * tick;
 
-			for (int i = 0; i < Rows; i++)
+			for (int i = 0; i < rowCount; i++)
 			{
-				double price = Instrument.MasterInstrument.RoundToTickSize(minPrice + i * step);
-				double vol = 0;
-				if (volumeByPrice.TryGetValue(price, out double exactVol))
-					vol = exactVol;
-				else
+				double rowPrice = Math.Round((minPrice + i * bucketSize) / tick) * tick;
+				double rowVolume = 0;
+
+				for (double p = rowPrice; p < rowPrice + bucketSize; p += tick)
 				{
-					var nearest = ordered.OrderBy(p => Math.Abs(p - price)).FirstOrDefault();
-					if (nearest != 0 || volumeByPrice.ContainsKey(nearest))
-						vol = volumeByPrice[nearest];
+					p = Math.Round(p / tick) * tick;
+					if (volumeByPrice.TryGetValue(p, out double v))
+						rowVolume += v;
 				}
 
-				profileRows.Add(new ProfileRow { Price = price, Volume = vol });
-				totalVolume += vol;
-				if (vol > maxVolume)
+				profileRows.Add(new ProfileRow { Price = rowPrice, Volume = rowVolume });
+				totalVolume += rowVolume;
+				if (rowVolume > maxVolume)
 				{
-					maxVolume = vol;
-					pocPrice = price;
-					pocIndex = i;
+					maxVolume = rowVolume;
+					pocPrice = rowPrice;
 				}
 			}
 
@@ -240,30 +219,34 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 		private void CalculateValueArea()
 		{
-			if (profileRows == null || profileRows.Count == 0 || pocIndex < 0)
+			if (profileRows == null || profileRows.Count == 0 || double.IsNaN(pocPrice))
 				return;
 
-			double target = totalVolume * 0.70;
-			double cum = profileRows[pocIndex].Volume;
+			int pocIndex = profileRows.FindIndex(r => r.Price == pocPrice);
+			if (pocIndex < 0)
+				return;
+
+			double target = totalVolume * (ValueAreaPercentage / 100.0);
+			double accumulated = profileRows[pocIndex].Volume;
 			int low = pocIndex;
 			int high = pocIndex;
 
-			while (cum < target && (low > 0 || high < profileRows.Count - 1))
+			while (accumulated < target && (low > 0 || high < profileRows.Count - 1))
 			{
-				double below = low > 0 ? profileRows[low - 1].Volume : double.MinValue;
-				double above = high < profileRows.Count - 1 ? profileRows[high + 1].Volume : double.MinValue;
+				double volumeAbove = high < profileRows.Count - 1 ? profileRows[high + 1].Volume : double.MinValue;
+				double volumeBelow = low > 0 ? profileRows[low - 1].Volume : double.MinValue;
 
-				if (above >= below)
+				if (volumeAbove >= volumeBelow)
 				{
 					if (high < profileRows.Count - 1)
 					{
 						high++;
-						cum += profileRows[high].Volume;
+						accumulated += profileRows[high].Volume;
 					}
 					else if (low > 0)
 					{
 						low--;
-						cum += profileRows[low].Volume;
+						accumulated += profileRows[low].Volume;
 					}
 				}
 				else
@@ -271,28 +254,26 @@ namespace NinjaTrader.NinjaScript.Indicators
 					if (low > 0)
 					{
 						low--;
-						cum += profileRows[low].Volume;
+						accumulated += profileRows[low].Volume;
 					}
 					else if (high < profileRows.Count - 1)
 					{
 						high++;
-						cum += profileRows[high].Volume;
+						accumulated += profileRows[high].Volume;
 					}
 				}
 			}
 
-			valueAreaLowIndex = low;
-			valueAreaHighIndex = high;
 			valueAreaLow = profileRows[low].Price;
 			valueAreaHigh = profileRows[high].Price;
 		}
 
 		private SharpDX.Direct2D1.Brush GetRowBrush(double price)
 		{
-			if (Math.Abs(price - pocPrice) < TickSize * 0.5)
+			if (!double.IsNaN(pocPrice) && Math.Abs(price - pocPrice) < TickSize * 0.5)
 				return pocDxBrush;
 
-			if (price >= valueAreaLow && price <= valueAreaHigh)
+			if (!double.IsNaN(valueAreaLow) && !double.IsNaN(valueAreaHigh) && price >= valueAreaLow && price <= valueAreaHigh)
 				return valueAreaDxBrush;
 
 			return outsideDxBrush;
@@ -329,8 +310,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 				textFormat.Dispose();
 				textFormat = null;
 			}
-
-			resourcesInitialized = false;
 		}
 
 		#region Properties
@@ -340,7 +319,12 @@ namespace NinjaTrader.NinjaScript.Indicators
 		public int Rows { get; set; }
 
 		[NinjaScriptProperty]
-		[Display(Name = "Show Profile", Description = "Show or hide the rendered profile", Order = 2, GroupName = "Parameters")]
+		[Range(1, 100)]
+		[Display(Name = "Value Area %", Description = "Percentage of total volume used for the value area", Order = 2, GroupName = "Parameters")]
+		public int ValueAreaPercentage { get; set; }
+
+		[NinjaScriptProperty]
+		[Display(Name = "Show Profile", Description = "Show or hide the rendered profile", Order = 3, GroupName = "Parameters")]
 		public bool ShowProfile { get; set; }
 
 		[XmlIgnore]
