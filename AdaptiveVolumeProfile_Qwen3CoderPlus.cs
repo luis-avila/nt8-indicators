@@ -49,7 +49,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			{
 				Description									= @"Real-time volume profile that displays as horizontal bars on the right side of the price panel. Automatically resets at each new session.";
 				Name										= "AdaptiveVolumeProfile";
-				Calculate									= Calculate.OnBarUpdate;
+				Calculate									= Calculate.OnEachTick;
 				IsOverlay									= true;
 				DisplayInDataBox							= false;
 				DrawOnPricePanel							= true;
@@ -113,18 +113,27 @@ namespace NinjaTrader.NinjaScript.Indicators
 				val = 0;
 				maxVolume = 0;
 			}
+		}
+		
+		protected override void OnMarketData(MarketDataEventArgs marketDataUpdate)
+		{
+			if (CurrentBar < 0 || marketDataUpdate.MarketDataType != MarketDataType.Last) 
+				return;
 			
-			// Only process if we have volume data
-			if (Volume[0] > 0)
+			// We only want to record volume for Last (trade) events
+			int lastTradeVolume = marketDataUpdate.Volume;
+			double lastTradePrice = marketDataUpdate.Price;
+			
+			if (lastTradeVolume > 0)
 			{
 				// Normalize price to ticksize to create fixed price buckets
-				double normalizedPrice = Math.Round(Input[0].Close / TickSize) * TickSize;
+				double normalizedPrice = Math.Round(lastTradePrice / TickSize) * TickSize;
 				
 				// Add volume to the appropriate price level
 				if (volumeProfile.ContainsKey(normalizedPrice))
-					volumeProfile[normalizedPrice] += Volume[0];
+					volumeProfile[normalizedPrice] += lastTradeVolume;
 				else
-					volumeProfile[normalizedPrice] = Volume[0];
+					volumeProfile[normalizedPrice] = lastTradeVolume;
 				
 				// Recalculate POC and Value Area
 				RecalculatePOCAndValueArea();
@@ -216,7 +225,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 				
 				// Determine which brush to use based on value area classification
 				SolidColorBrush useBrush;
-				if (Math.Abs(kv.Key - pocPrice) < (TickSize / 2))  // Check if this is the POC level
+				if (Math.Abs(kv.Key - pocPrice) < TickSize)  // Check if this is the POC level (within one tick)
 					useBrush = pocBrushDx;
 				else if (kv.Key >= val && kv.Key <= vah)  // Check if within value area
 					useBrush = valueAreaBrushDx;
