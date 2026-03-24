@@ -171,7 +171,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (outsideBrushDx != null && !outsideBrushDx.IsDisposed)
             {
                 outsideBrushDx.Dispose();
-                outsideBrushBrushDx = null;
+                outsideBrushDx = null;
             }
             
             // Create new SharpDX brushes if RenderTarget is available
