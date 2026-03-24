@@ -1,93 +1,160 @@
 #region Using declarations
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.ComponentModel;
-using System.Windows;
-using System.Windows.Media;
-using NinjaTrader.Cbi;
-using NinjaTrader.Data;
-using NinjaTrader.Gui;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using NinjaTrader.Gui.Chart;
+using NinjaTrader.NinjaScript;
+using NinjaTrader.NinjaScript.Indicators;
 using SharpDX;
 using SharpDX.Direct2D1;
-using SharpDX.DirectWrite;
-using System.Drawing;
+using SharpDX.DXGI;
+using Factory = SharpDX.Direct2D1.Factory;
 #endregion
 
-namespace NinjaTrader.Indicator
+namespace NinjaTrader.NinjaScript.Indicators
 {
-    /// <summary>
-    /// AdaptiveVolumeProfile - Real-time session-based volume profile with SharpDX rendering.
-    /// Displays volume distribution across price levels with POC, Value Area, and outside levels highlighted.
-    /// </summary>
     public class AdaptiveVolumeProfile : Indicator
     {
-        #region Variables
-        private Dictionary<double, long> volumeProfile;
-        private double pocPrice;
-        private double valPrice;
-        private double vahPrice;
-        private long maxVolume;
-        private long totalVolume;
-        private bool sessionReset;
-        private float rowHeight;
-
-        // SharpDX brushes - class level for proper lifecycle management
-        private SharpDX.Direct2D1.SolidColorBrush pocDxBrush;
-        private SharpDX.Direct2D1.SolidColorBrush valueAreaDxBrush;
-        private SharpDX.Direct2D1.SolidColorBrush outsideDxBrush;
-        #endregion
-
         #region Properties
 
         [NinjaScriptProperty]
-        [Display(Name = "Show Profile", Description = "Toggle visibility of the volume profile", Order = 1, GroupName = "Display")]
-        public bool ShowProfile { get; set; }
+        [Display(Name = "Show Profile", Description = "Show or hide the volume profile", GroupName = "General", Order = 1)]
+        public bool ShowProfile
+        {
+            get { return showProfile; }
+            set { showProfile = value; }
+        }
 
         [NinjaScriptProperty]
         [Range(5, 100)]
-        [Display(Name = "Number Of Levels", Description = "Number of price levels to display", Order = 2, GroupName = "Display")]
-        public int NumberOfLevels { get; set; }
+        [Display(Name = "Number of Levels", Description = "Number of price levels (rows) in the profile", GroupName = "General", Order = 2)]
+        public int NumberOfLevels
+        {
+            get { return numberOfLevels; }
+            set { numberOfLevels = Math.Max(5, Math.Min(100, value)); }
+        }
 
         [NinjaScriptProperty]
         [Range(50, 90)]
-        [Display(Name = "Value Area %", Description = "Percentage of volume for Value Area", Order = 3, GroupName = "Display")]
-        public int ValueAreaPercentage { get; set; }
+        [Display(Name = "Value Area %", Description = "Percentage of volume for Value Area", GroupName = "General", Order = 3)]
+        public int ValueAreaPercentage
+        {
+            get { return valueAreaPercentage; }
+            set { valueAreaPercentage = Math.Max(50, Math.Min(90, value)); }
+        }
 
         [NinjaScriptProperty]
         [Range(20, 300)]
-        [Display(Name = "Max Bar Width", Description = "Maximum width of volume bars in pixels", Order = 4, GroupName = "Display")]
-        public int MaxBarWidth { get; set; }
+        [Display(Name = "Max Bar Width", Description = "Maximum width of volume bars in pixels", GroupName = "General", Order = 4)]
+        public int MaxBarWidth
+        {
+            get { return maxBarWidth; }
+            set { maxBarWidth = Math.Max(20, Math.Min(300, value)); }
+        }
 
         [NinjaScriptProperty]
         [Range(5, 100)]
-        [Display(Name = "Profile X Offset", Description = "Distance from right edge in pixels", Order = 5, GroupName = "Display")]
-        public int ProfileXOffset { get; set; }
+        [Display(Name = "X Offset", Description = "Distance from right edge in pixels", GroupName = "General", Order = 5)]
+        public int ProfileXOffset
+        {
+            get { return profileXOffset; }
+            set { profileXOffset = Math.Max(5, Math.Min(100, value)); }
+        }
 
-        [NinjaScriptProperty]
-        [Display(Name = "POC Brush", Description = "Color for Point of Control", Order = 6, GroupName = "Colors")]
-        public Brush POCBrush { get; set; }
+        [XmlIgnore]
+        [Display(Name = "POC Color", Description = "Color for Point of Control", GroupName = "Colors", Order = 10)]
+        public System.Windows.Media.Brush POCBrush
+        {
+            get { return pocBrush; }
+            set { pocBrush = value; }
+        }
 
-        [NinjaScriptProperty]
-        [Display(Name = "Value Area Brush", Description = "Color for Value Area levels", Order = 7, GroupName = "Colors")]
-        public Brush ValueAreaBrush { get; set; }
+        [XmlIgnore]
+        [Display(Name = "Value Area Color", Description = "Color for Value Area levels", GroupName = "Colors", Order = 11)]
+        public System.Windows.Media.Brush ValueAreaBrush
+        {
+            get { return valueAreaBrush; }
+            set { valueAreaBrush = value; }
+        }
 
-        [NinjaScriptProperty]
-        [Display(Name = "Outside Brush", Description = "Color for levels outside Value Area", Order = 8, GroupName = "Colors")]
-        public Brush OutsideBrush { get; set; }
+        [XmlIgnore]
+        [Display(Name = "Outside Color", Description = "Color for levels outside Value Area", GroupName = "Colors", Order = 12)]
+        public System.Windows.Media.Brush OutsideBrush
+        {
+            get { return outsideBrush; }
+            set { outsideBrush = value; }
+        }
+
+        [Browsable(false)]
+        public string POCBrushSerialize
+        {
+            get { return pocBrush != null ? pocBrush.ToString() : "Yellow"; }
+            set { }
+        }
+
+        [Browsable(false)]
+        public string ValueAreaBrushSerialize
+        {
+            get { return valueAreaBrush != null ? valueAreaBrush.ToString() : "DodgerBlue"; }
+            set { }
+        }
+
+        [Browsable(false)]
+        public string OutsideBrushSerialize
+        {
+            get { return outsideBrush != null ? outsideBrush.ToString() : "Gray"; }
+            set { }
+        }
 
         #endregion
 
-        #region State overrides
+        #region Fields
+
+        private bool showProfile = true;
+        private int numberOfLevels = 20;
+        private int valueAreaPercentage = 70;
+        private int maxBarWidth = 150;
+        private int profileXOffset = 10;
+
+        private System.Windows.Media.Brush pocBrush = System.Windows.Media.Brushes.Yellow;
+        private System.Windows.Media.Brush valueAreaBrush = System.Windows.Media.Brushes.DodgerBlue;
+        private System.Windows.Media.Brush outsideBrush = System.Windows.Media.Brushes.Gray;
+
+        // Volume profile: price level -> volume at that level
+        private Dictionary<double, double> volumeProfile;
+
+        // Session tracking
+        private bool sessionInitialized;
+        private double lastBarVolume;
+        private double totalSessionVolume;
+
+        // POC and Value Area
+        private double pocPrice;
+        private double pocVolume;
+        private HashSet<double> valueAreaPriceSet;
+
+        // Price range for the session (for row-based bucketing)
+        private double sessionLowPrice;
+        private double sessionHighPrice;
+        private double bucketSize;
+        private bool priceRangeSet;
+
+        // SharpDX brushes (class-level, disposed properly)
+        private SharpDX.Direct2D1.SolidColorBrush pocDxBrush;
+        private SharpDX.Direct2D1.SolidColorBrush valueAreaDxBrush;
+        private SharpDX.Direct2D1.SolidColorBrush outsideDxBrush;
+
+        #endregion
+
+        #region State Management
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
                 Name = "AdaptiveVolumeProfile";
-                Description = "Real-time session-based volume profile with POC and Value Area highlighting";
-
                 Calculate = Calculate.OnEachTick;
                 IsOverlay = true;
                 DrawOnPricePanel = true;
@@ -95,281 +162,227 @@ namespace NinjaTrader.Indicator
                 DrawHorizontalGridLines = false;
                 DrawVerticalGridLines = false;
                 PaintPriceMarkers = false;
-                ScaleJustification = ScaleJustification.Right;
-                IsSuspendedWhileInactive = true;
-
-                ShowProfile = true;
-                NumberOfLevels = 25;
-                ValueAreaPercentage = 70;
-                MaxBarWidth = 150;
-                ProfileXOffset = 10;
-
-                POCBrush = Brushes.Yellow;
-                ValueAreaBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 144, 255)); // DodgerBlue
-                OutsideBrush = Brushes.Gray;
             }
             else if (State == State.Configure)
             {
-                // No additional configuration needed
-            }
-            else if (State == State.DataLoaded)
-            {
-                volumeProfile = new Dictionary<double, long>();
-                sessionReset = false;
+                // Initialize empty collections
+                volumeProfile = new Dictionary<double, double>();
+                valueAreaPriceSet = new HashSet<double>();
+
+                // Reset session state
+                sessionInitialized = false;
+                lastBarVolume = 0;
+                totalSessionVolume = 0;
                 pocPrice = 0;
-                valPrice = 0;
-                vahPrice = 0;
-                maxVolume = 0;
-                totalVolume = 0;
+                pocVolume = 0;
+                priceRangeSet = false;
             }
             else if (State == State.Terminated)
             {
-                // Dispose SharpDX brushes
-                if (pocDxBrush != null && !pocDxBrush.IsDisposed)
-                {
-                    pocDxBrush.Dispose();
-                    pocDxBrush = null;
-                }
-                if (valueAreaDxBrush != null && !valueAreaDxBrush.IsDisposed)
-                {
-                    valueAreaDxBrush.Dispose();
-                    valueAreaDxBrush = null;
-                }
-                if (outsideDxBrush != null && !outsideDxBrush.IsDisposed)
-                {
-                    outsideDxBrush.Dispose();
-                    outsideDxBrush = null;
-                }
+                DisposeBrushes();
             }
         }
 
         #endregion
 
-        #region OnBarUpdate
+        #region Volume Accumulation
 
         protected override void OnBarUpdate()
         {
-            // Session detection - reset at start of new session
-            if (Bars.IsFirstBarOfSession || sessionReset)
+            // Only process primary series
+            if (BarsInProgress != 0)
+                return;
+
+            // Skip first bar (no previous bar to calculate delta from)
+            if (CurrentBar == 0)
+                return;
+
+            // Check for new session - reset once per session only
+            if (Bars.IsFirstBarOfSession)
+            {
+                ResetSessionData();
+            }
+
+            // Skip if not initialized for this session yet
+            if (!sessionInitialized)
+                return;
+
+            // Calculate incremental volume for this bar
+            double currentBarTotalVolume = Volume[0];
+            double incrementalVolume = currentBarTotalVolume - lastBarVolume;
+
+            // Guard against invalid volume (shouldn't happen but be safe)
+            if (incrementalVolume < 0)
+                incrementalVolume = currentBarTotalVolume;
+
+            // Only process if there's actual volume
+            if (incrementalVolume > 0)
+            {
+                // Get price range of current bar for bucketing
+                double barHigh = High[0];
+                double barLow = Low[0];
+
+                // Update session price range if needed
+                if (!priceRangeSet || barHigh > sessionHighPrice)
+                    sessionHighPrice = barHigh;
+                if (!priceRangeSet || barLow < sessionLowPrice)
+                    sessionLowPrice = barLow;
+
+                // Ensure bucket boundaries are set
+                if (!priceRangeSet)
+                {
+                    InitializeBuckets();
+                    priceRangeSet = true;
+                }
+
+                // Distribute the incremental volume across price levels the bar traded through
+                DistributeVolumeAcrossLevels(barLow, barHigh, incrementalVolume);
+
+                // Update total session volume
+                totalSessionVolume += incrementalVolume;
+
+                // Recalculate POC and Value Area
+                CalculatePOCAndValueArea();
+            }
+
+            // Track volume for next bar's delta calculation
+            lastBarVolume = currentBarTotalVolume;
+        }
+
+        private void ResetSessionData()
+        {
+            // Only reset once per session - sessionInitialized prevents repeated clearing
+            if (sessionInitialized)
             {
                 volumeProfile.Clear();
-                sessionReset = false;
+                valueAreaPriceSet.Clear();
+                totalSessionVolume = 0;
+                pocPrice = 0;
+                pocVolume = 0;
+                priceRangeSet = false;
             }
 
-            // Accumulate volume at normalized price level
-            double normalizedPrice = Math.Round(Close[0] / TickSize) * TickSize;
-
-            if (volumeProfile.ContainsKey(normalizedPrice))
-                volumeProfile[normalizedPrice] += (long)Volume[0];
-            else
-                volumeProfile[normalizedPrice] = (long)Volume[0];
-
-            // Recalculate POC and Value Area
-            RecalculatePOCAndValueArea();
+            // Mark as initialized for this session
+            sessionInitialized = true;
         }
 
-        #endregion
-
-        #region SharpDX Rendering
-
-        protected override void OnRenderTargetChanged()
+        private void InitializeBuckets()
         {
-            try
-            {
-                // Dispose existing brushes
-                if (pocDxBrush != null && !pocDxBrush.IsDisposed)
-                {
-                    pocDxBrush.Dispose();
-                    pocDxBrush = null;
-                }
-                if (valueAreaDxBrush != null && !valueAreaDxBrush.IsDisposed)
-                {
-                    valueAreaDxBrush.Dispose();
-                    valueAreaDxBrush = null;
-                }
-                if (outsideDxBrush != null && !outsideDxBrush.IsDisposed)
-                {
-                    outsideDxBrush.Dispose();
-                    outsideDxBrush = null;
-                }
+            // Set up bucket boundaries based on session price range
+            // Use the actual high/low of the session bars
+            double tickSize = TickSize;
 
-                // Create new brushes if RenderTarget is available
-                if (RenderTarget != null)
-                {
-                    pocDxBrush = POCBrush.ToDxBrush(RenderTarget) as SharpDX.Direct2D1.SolidColorBrush;
-                    valueAreaDxBrush = ValueAreaBrush.ToDxBrush(RenderTarget) as SharpDX.Direct2D1.SolidColorBrush;
-                    outsideDxBrush = OutsideBrush.ToDxBrush(RenderTarget) as SharpDX.Direct2D1.SolidColorBrush;
-                }
-            }
-            catch (Exception ex)
+            // Round to nearest tick
+            sessionLowPrice = Math.Round(sessionLowPrice / tickSize) * tickSize;
+            sessionHighPrice = Math.Round(sessionHighPrice / tickSize) * tickSize;
+
+            // Ensure we have a valid range
+            if (sessionHighPrice <= sessionLowPrice)
             {
-                // Log error but don't crash
-                Print("AdaptiveVolumeProfile: Error creating brushes - " + ex.Message);
+                sessionHighPrice = sessionLowPrice + tickSize;
             }
+
+            // Calculate bucket size (price range / number of levels)
+            bucketSize = (sessionHighPrice - sessionLowPrice) / NumberOfLevels;
+
+            // Ensure bucket size is at least one tick
+            if (bucketSize < tickSize)
+                bucketSize = tickSize;
         }
 
-        protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
+        private void DistributeVolumeAcrossLevels(double barLow, double barHigh, double volume)
         {
-            if (!ShowProfile || volumeProfile == null || volumeProfile.Count == 0)
-                return;
+            double tickSize = TickSize;
 
-            if (pocDxBrush == null || valueAreaDxBrush == null || outsideDxBrush == null)
-                return;
+            // Normalize bar prices to tick boundaries
+            double normalizedLow = Math.Round(barLow / tickSize) * tickSize;
+            double normalizedHigh = Math.Round(barHigh / tickSize) * tickSize;
 
-            try
+            // Ensure low <= high
+            if (normalizedLow > normalizedHigh)
             {
-                // Calculate row height based on visible price range
-                double visibleMinPrice = chartScale.MinValue;
-                double visibleMaxPrice = chartScale.MaxValue;
-                double visibleRange = visibleMaxPrice - visibleMinPrice;
-
-                if (visibleRange <= 0 || NumberOfLevels <= 0)
-                    return;
-
-                rowHeight = (float)(visibleRange / NumberOfLevels);
-
-                // Get visible bar range
-                int fromIndex = ChartBars.FromIndex;
-                int toIndex = ChartBars.ToIndex;
-
-                if (fromIndex < 0 || toIndex < 0 || toIndex <= fromIndex)
-                    return;
-
-                // Calculate x position for right edge of profile
-                float xRight = (float)(ChartPanel.X + ChartPanel.Width - ProfileXOffset);
-
-                // Get all price levels sorted by price
-                var sortedLevels = volumeProfile.OrderBy(kv => kv.Key).ToList();
-
-                // Calculate max volume for scaling
-                long localMaxVolume = sortedLevels.Max(kv => kv.Value);
-                if (localMaxVolume <= 0)
-                    return;
-
-                // Draw volume bars for each price level
-                foreach (var kvp in sortedLevels)
-                {
-                    // Calculate Y position (top of the bar)
-                    float yTop = chartScale.GetYByValue(kvp.Key);
-
-                    // Skip if outside visible area
-                    if (yTop < ChartPanel.Y || yTop > ChartPanel.Y + ChartPanel.Height)
-                        continue;
-
-                    // Calculate bar width proportional to volume
-                    float barWidth = (float)((kvp.Value / (double)localMaxVolume) * MaxBarWidth);
-                    if (barWidth < 1)
-                        barWidth = 1;
-
-                    // Determine which brush to use
-                    SharpDX.Direct2D1.SolidColorBrush brushToUse;
-                    bool isPOC = Math.Abs(kvp.Key - pocPrice) < TickSize / 2.0;
-                    bool isInValueArea = kvp.Key >= valPrice && kvp.Key <= vahPrice;
-
-                    if (isPOC)
-                        brushToUse = pocDxBrush;
-                    else if (isInValueArea)
-                        brushToUse = valueAreaDxBrush;
-                    else
-                        brushToUse = outsideDxBrush;
-
-                    // Draw the filled rectangle
-                    SharpDX.RectangleF rect = new SharpDX.RectangleF(
-                        xRight - barWidth,
-                        yTop - rowHeight / 2f,
-                        barWidth,
-                        rowHeight
-                    );
-
-                    RenderTarget.FillRectangle(rect, brushToUse);
-                }
+                double temp = normalizedLow;
+                normalizedLow = normalizedHigh;
+                normalizedHigh = temp;
             }
-            catch (Exception ex)
+
+            // Count how many price levels this bar spans
+            double priceRange = normalizedHigh - normalizedLow;
+            int levelsSpanned = Math.Max(1, (int)Math.Round(priceRange / tickSize) + 1);
+
+            // Volume per tick/level
+            double volumePerLevel = volume / levelsSpanned;
+
+            // Add volume to each price level the bar traded through
+            for (int i = 0; i < levelsSpanned; i++)
             {
-                // Log error but don't crash - render failures should not stop the indicator
-                Print("AdaptiveVolumeProfile: Render error - " + ex.Message);
+                double priceLevel = normalizedLow + (i * tickSize);
+
+                if (volumeProfile.ContainsKey(priceLevel))
+                    volumeProfile[priceLevel] += volumePerLevel;
+                else
+                    volumeProfile[priceLevel] = volumePerLevel;
             }
         }
 
-        #endregion
-
-        #region Calculations
-
-        private void RecalculatePOCAndValueArea()
-        {
-            if (volumeProfile == null || volumeProfile.Count == 0)
-                return;
-
-            // Find POC (Point of Control) - price level with highest volume
-            var maxKVP = volumeProfile.Aggregate((l, r) => l.Value > r.Value ? l : r);
-            pocPrice = maxKVP.Key;
-            maxVolume = maxKVP.Value;
-            totalVolume = volumeProfile.Values.Sum();
-
-            if (totalVolume <= 0)
-                return;
-
-            // Calculate target volume for Value Area
-            long targetVolume = (long)(totalVolume * ValueAreaPercentage / 100.0);
-
-            // Value Area calculation using proper volume-weighted expansion algorithm
-            // Start from POC and expand toward the side with HIGHER volume first
-            CalculateValueArea(targetVolume);
-        }
-
-        private void CalculateValueArea(long targetVolume)
+        private void CalculatePOCAndValueArea()
         {
             if (volumeProfile.Count == 0)
                 return;
 
-            // Get all price levels sorted by distance from POC
-            var sortedByDistance = volumeProfile
-                .OrderBy(kv => Math.Abs(kv.Key - pocPrice))
-                .ToList();
+            // Find POC (price level with highest volume)
+            var pocKvp = volumeProfile.Aggregate((l, r) => l.Value > r.Value ? l : r);
+            pocPrice = pocKvp.Key;
+            pocVolume = pocKvp.Value;
 
-            // Separate levels above and below POC
-            var abovePOC = sortedByDistance
+            // Target volume for Value Area
+            double targetVolume = totalSessionVolume * (ValueAreaPercentage / 100.0);
+
+            // Value Area expansion: start from POC, expand to adjacent level with larger volume
+            valueAreaPriceSet.Clear();
+            valueAreaPriceSet.Add(pocPrice);
+
+            double accumulatedVolume = pocVolume;
+
+            // Sort price levels above and below POC
+            var pricesAbove = volumeProfile
                 .Where(kv => kv.Key > pocPrice)
                 .OrderBy(kv => kv.Key)
                 .ToList();
 
-            var belowPOC = sortedByDistance
+            var pricesBelow = volumeProfile
                 .Where(kv => kv.Key < pocPrice)
                 .OrderByDescending(kv => kv.Key)
                 .ToList();
 
-            // Initialize Value Area with POC
-            HashSet<double> valueAreaPrices = new HashSet<double> { pocPrice };
-            long accumulatedVolume = maxVolume;
-            long aboveVolume = abovePOC.Sum(kv => kv.Value);
-            long belowVolume = belowPOC.Sum(kv => kv.Value);
-
-            // Current expansion pointers
             int aboveIndex = 0;
             int belowIndex = 0;
-            double currentAbovePrice = abovePOC.Count > 0 ? abovePOC[0].Key : double.MaxValue;
-            double currentBelowPrice = belowPOC.Count > 0 ? belowPOC[0].Key : double.MinValue;
 
-            // Expand toward the side with MORE volume first
+            // Compare FIRST adjacent level volumes (not total remaining)
+            double aboveFirstVolume = aboveIndex < pricesAbove.Count ? pricesAbove[aboveIndex].Value : 0;
+            double belowFirstVolume = belowIndex < pricesBelow.Count ? pricesBelow[belowIndex].Value : 0;
+
             while (accumulatedVolume < targetVolume)
             {
                 bool addAbove = false;
                 bool addBelow = false;
 
-                // Determine which side to expand from
-                if (aboveIndex < abovePOC.Count && belowIndex < belowPOC.Count)
+                // Compare the NEXT adjacent level on each side
+                // NOT total remaining above vs below - this was the bug
+                double nextAboveVol = aboveIndex < pricesAbove.Count ? pricesAbove[aboveIndex].Value : double.MaxValue;
+                double nextBelowVol = belowIndex < pricesBelow.Count ? pricesBelow[belowIndex].Value : double.MaxValue;
+
+                if (aboveIndex < pricesAbove.Count && belowIndex < pricesBelow.Count)
                 {
-                    // Both sides available - expand toward side with more volume
-                    if (aboveVolume >= belowVolume)
-                        addAbove = true;
-                    else
-                        addBelow = true;
+                    // Both sides available - choose the one with larger volume at that level
+                    addAbove = nextAboveVol >= nextBelowVol;
+                    addBelow = !addAbove;
                 }
-                else if (aboveIndex < abovePOC.Count)
+                else if (aboveIndex < pricesAbove.Count)
                 {
                     addAbove = true;
                 }
-                else if (belowIndex < belowPOC.Count)
+                else if (belowIndex < pricesBelow.Count)
                 {
                     addBelow = true;
                 }
@@ -379,35 +392,198 @@ namespace NinjaTrader.Indicator
                     break;
                 }
 
-                if (addAbove && aboveIndex < abovePOC.Count)
+                // Add the selected level
+                if (addAbove && aboveIndex < pricesAbove.Count)
                 {
-                    valueAreaPrices.Add(currentAbovePrice);
-                    accumulatedVolume += abovePOC[aboveIndex].Value;
+                    valueAreaPriceSet.Add(pricesAbove[aboveIndex].Key);
+                    accumulatedVolume += pricesAbove[aboveIndex].Value;
                     aboveIndex++;
-                    if (aboveIndex < abovePOC.Count)
-                    {
-                        currentAbovePrice = abovePOC[aboveIndex].Key;
-                        aboveVolume = abovePOC.Skip(aboveIndex).Sum(kv => kv.Value);
-                    }
                 }
-                else if (addBelow && belowIndex < belowPOC.Count)
+                else if (addBelow && belowIndex < pricesBelow.Count)
                 {
-                    valueAreaPrices.Add(currentBelowPrice);
-                    accumulatedVolume += belowPOC[belowIndex].Value;
+                    valueAreaPriceSet.Add(pricesBelow[belowIndex].Key);
+                    accumulatedVolume += pricesBelow[belowIndex].Value;
                     belowIndex++;
-                    if (belowIndex < belowPOC.Count)
-                    {
-                        currentBelowPrice = belowPOC[belowIndex].Key;
-                        belowVolume = belowPOC.Skip(belowIndex).Sum(kv => kv.Value);
-                    }
                 }
             }
+        }
 
-            // Set Value Area High and Low
-            vahPrice = valueAreaPrices.Max();
-            valPrice = valueAreaPrices.Min();
+        #endregion
+
+        #region SharpDX Rendering
+
+        protected override void OnRenderTargetChanged()
+        {
+            DisposeBrushes();
+
+            if (RenderTarget == null)
+                return;
+
+            try
+            {
+                pocDxBrush = new SharpDX.Direct2D1.SolidColorBrush(
+                    RenderTarget,
+                    POCBrush.ToDxColor4());
+
+                valueAreaDxBrush = new SharpDX.Direct2D1.SolidColorBrush(
+                    RenderTarget,
+                    ValueAreaBrush.ToDxColor4());
+
+                outsideDxBrush = new SharpDX.Direct2D1.SolidColorBrush(
+                    RenderTarget,
+                    OutsideBrush.ToDxColor4());
+            }
+            catch (Exception)
+            {
+                DisposeBrushes();
+            }
+        }
+
+        private void DisposeBrushes()
+        {
+            if (pocDxBrush != null && !pocDxBrush.IsDisposed)
+            {
+                pocDxBrush.Dispose();
+                pocDxBrush = null;
+            }
+
+            if (valueAreaDxBrush != null && !valueAreaDxBrush.IsDisposed)
+            {
+                valueAreaDxBrush.Dispose();
+                valueAreaDxBrush = null;
+            }
+
+            if (outsideDxBrush != null && !outsideDxBrush.IsDisposed)
+            {
+                outsideDxBrush.Dispose();
+                outsideDxBrush = null;
+            }
+        }
+
+        protected override void OnRender(ChartControl chartControl, ChartPanels.ChartPanel chartPanel)
+        {
+            // Early exit if profile is hidden
+            if (!ShowProfile)
+                return;
+
+            // Validate render targets
+            if (chartControl == null || chartPanel == null || RenderTarget == null)
+                return;
+
+            // Ensure brushes are created
+            if (pocDxBrush == null || valueAreaDxBrush == null || outsideDxBrush == null)
+                return;
+
+            // Need chart bars for price conversion
+            ChartBars chartBars = ChartBars;
+            if (chartBars == null)
+                return;
+
+            // Need volume data
+            if (volumeProfile.Count == 0 || totalSessionVolume <= 0)
+                return;
+
+            try
+            {
+                // Get chart dimensions
+                float panelWidth = chartPanel.Width;
+                float panelHeight = chartPanel.Height;
+
+                if (panelWidth <= 0 || panelHeight <= 0)
+                    return;
+
+                // Right edge of the profile area
+                float profileRightX = panelWidth - ProfileXOffset;
+
+                // Find max volume for scaling
+                double maxVolume = volumeProfile.Values.Max();
+                if (maxVolume <= 0)
+                    return;
+
+                // Calculate visible price range from chart
+                // Use BarsArray to get price range
+                double maxPrice = Closes[0][BarsArray[0].ToIndex];
+                double minPrice = Closes[0][BarsArray[0].ToIndex];
+
+                for (int i = BarsArray[0].FromIndex; i <= BarsArray[0].ToIndex; i++)
+                {
+                    if (i >= 0 && i < Closes[0].Length)
+                    {
+                        double high = Highs[0][i];
+                        double low = Lows[0][i];
+                        if (high > maxPrice) maxPrice = high;
+                        if (low < minPrice) minPrice = low;
+                    }
+                }
+
+                double priceRange = maxPrice - minPrice;
+                if (priceRange <= 0)
+                    return;
+
+                // Calculate pixels per price
+                float pixelsPerPrice = panelHeight / (float)priceRange;
+
+                // Row height for each price level (equal distribution across visible range)
+                float rowHeight = panelHeight / (float)NumberOfLevels;
+
+                // Draw each price level
+                foreach (var kvp in volumeProfile)
+                {
+                    double priceLevel = kvp.Key;
+                    double levelVolume = kvp.Value;
+
+                    // Skip prices outside visible range (with small margin)
+                    if (priceLevel < minPrice - TickSize || priceLevel > maxPrice + TickSize)
+                        continue;
+
+                    // Calculate Y position (inverted - price increases going up)
+                    float yCenter = panelHeight - (float)((priceLevel - minPrice) / priceRange * panelHeight);
+
+                    // Calculate bar width proportional to volume vs POC
+                    float barWidth = (float)((levelVolume / maxVolume) * MaxBarWidth);
+                    if (barWidth < 1)
+                        barWidth = 1;
+
+                    // Calculate bar X position (anchored to right edge)
+                    float barLeft = profileRightX - barWidth;
+
+                    // Determine brush color
+                    SharpDX.Direct2D1.SolidColorBrush brush;
+
+                    bool isPOC = Math.Abs(priceLevel - pocPrice) < TickSize / 2.0;
+                    bool isInValueArea = valueAreaPriceSet.Contains(priceLevel);
+
+                    if (isPOC)
+                        brush = pocDxBrush;
+                    else if (isInValueArea)
+                        brush = valueAreaDxBrush;
+                    else
+                        brush = outsideDxBrush;
+
+                    // Draw the volume bar
+                    RectangleF rect = new RectangleF(
+                        barLeft,
+                        yCenter - rowHeight / 2f,
+                        barWidth,
+                        rowHeight);
+
+                    RenderTarget.FillRectangle(rect, brush);
+                }
+            }
+            catch (Exception)
+            {
+                // Silently handle render errors to avoid flooding the log
+            }
         }
 
         #endregion
     }
 }
+
+#region NinjaScript Builder Code
+public class AdaptiveVolumeProfile : Indicator
+{
+    // This section is for NinjaScript Builder reference only
+    // DO NOT MODIFY
+}
+#endregion
