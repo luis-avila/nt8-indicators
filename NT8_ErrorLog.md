@@ -159,6 +159,23 @@ Never create new brush objects inside OnRender under any
 circumstances regardless of how color selection is handled.
 Models affected: Grok Code Fast 1 v2, GPT-5.4 Mini
 
+ERROR 19:
+Issue: ValueAreaPercentage hardcoded as 0.70 instead of 
+configurable property
+Symptom: User cannot adjust Value Area percentage from UI
+Fix: Always expose ValueAreaPercentage as a NinjaScriptProperty 
+with Range(1, 100) defaulting to 70 in State.SetDefaults
+Models affected: GPT-5.4 Mini, Grok Code Fast 1 multiple versions
+
+ERROR 20:
+Issue: Dynamic bucket step size calculated as span/Rows 
+causes volume to shift between buckets as session progresses
+Symptom: Volume profile shows inaccurate distribution
+Fix: Always normalize price to TickSize using 
+Math.Round(price / TickSize) * TickSize
+Never calculate dynamic step sizes based on price range
+Models affected: GPT-5.4 Mini, Grok Code Fast 1 multiple versions
+
 ========================================
 END OF ERROR LOG
 ========================================
