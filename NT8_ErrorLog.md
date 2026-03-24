@@ -140,7 +140,7 @@ both regressed in v2 despite being fixed in v1
 Symptom: Compile error on ToDxColor4, performance issue on brush creation
 Fix: Always use ToDxBrush(RenderTarget), always create brushes in 
 OnRenderTargetChanged never inside OnRender
-Models affected: Grok Code Fast 1 v2
+Models affected: Grok Code Fast 1 v2, GPT-5.4 Mini
 
 ERROR 18 UPDATE:
 Even when brushes are already created in OnRenderTargetChanged 
@@ -192,6 +192,65 @@ Fix: Properly separate logic between OnMarketData for individual
 tick data and OnBarUpdate for session resetting
 Never use Volume[0] in OnMarketData, only use MarketDataEventArgs
 Models affected: Qwen3 Coder Plus initial implementation
+
+========================================
+NEW ERRORS - March 2026 Session
+========================================
+
+ERROR 22:
+Issue: Missing #region Using declarations wrapper around using statements
+Symptom: Code style inconsistency, potential organization issues
+Fix: Always wrap using declarations in a #region block:
+#region Using declarations
+using System;
+using System.Collections.Generic;
+// etc
+#endregion
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 23:
+Issue: DrawOnPricePanel = false for overlay indicator
+Symptom: Indicator renders incorrectly or not at all in price panel
+Fix: Set DrawOnPricePanel = true when IsOverlay = true
+This is required for indicators that draw on the price chart
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 24:
+Issue: Value Area algorithm still using distance-based sorting
+Example: var sortedByDistance = volumeProfile.OrderBy(kv => Math.Abs(kv.Key - pocPrice));
+Symptom: Value Area expands symmetrically from POC regardless of 
+volume distribution, producing incorrect boundaries
+Fix: Use proper volume-weighted expansion algorithm:
+- Separate levels above and below POC
+- At each step, compare remaining volume above vs below
+- Expand toward the side with HIGHER remaining volume
+- Continue until target percentage is reached
+CORRECT algorithm: Track indices separately for above and below,
+compare cumulative volume at each expansion step, expand toward
+side with more volume first
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 25:
+Issue: Variable declared inside if block used outside its scope
+Example:
+if (condition)
+{
+    double belowPrice = 123.45;
+}
+else if (!valueAreaPrices.Contains(belowPrice)) // belowPrice not in scope here
+Symptom: Compile error - name does not exist in current context
+Fix: Declare variables at method scope, not inside conditional blocks
+if you need them in multiple branches or after the block
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 26:
+Issue: Values[0], Values[1], Values[2] exposed but AddPlot() never 
+called in SetDefaults
+Symptom: Indicator may not compile or produces unexpected behavior
+Fix: Either remove the Values[] references entirely OR call AddPlot()
+in State.SetDefaults if plots are intended
+For pure rendering indicators (no data series output), remove Values[] refs
+Models affected: AdaptiveVolumeProfile MiniMax v1
 
 ========================================
 END OF ERROR LOG
