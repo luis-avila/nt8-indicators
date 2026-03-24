@@ -178,39 +178,42 @@ namespace NinjaTrader.NinjaScript.Indicators
 			profileRows.Clear();
 			maxVolume = 0;
 			totalVolume = 0;
+			pocPrice = double.NaN;
 
-			var prices = volumeByPrice.Keys.OrderBy(p => p).ToList();
-			if (prices.Count == 0)
-				return;
+			var allRows = volumeByPrice
+				.OrderBy(kvp => kvp.Key)
+				.Select(kvp => new ProfileRow 
+				{ 
+					Price = kvp.Key, 
+					Volume = kvp.Value 
+				}).ToList();
 
-			double minPrice = prices.First();
-			double maxPrice = prices.Last();
-			double tick = TickSize;
-			double rowStep = tick;
-			int rowCount = Math.Max(1, Rows);
-			double rangeTicks = Math.Max(1, Math.Round((maxPrice - minPrice) / tick) + 1);
-			double ticksPerRow = Math.Max(1, Math.Ceiling(rangeTicks / rowCount));
-			double bucketSize = ticksPerRow * tick;
-
-			for (int i = 0; i < rowCount; i++)
+			foreach (var row in allRows)
 			{
-				double rowPrice = Math.Round((minPrice + i * bucketSize) / tick) * tick;
-				double rowVolume = 0;
-
-				for (double p = rowPrice; p < rowPrice + bucketSize; p += tick)
+				totalVolume += row.Volume;
+				if (row.Volume > maxVolume)
 				{
-					p = Math.Round(p / tick) * tick;
-					if (volumeByPrice.TryGetValue(p, out double v))
-						rowVolume += v;
+					maxVolume = row.Volume;
+					pocPrice = row.Price;
 				}
+			}
 
-				profileRows.Add(new ProfileRow { Price = rowPrice, Volume = rowVolume });
-				totalVolume += rowVolume;
-				if (rowVolume > maxVolume)
-				{
-					maxVolume = rowVolume;
-					pocPrice = rowPrice;
-				}
+			if (allRows.Count > Rows)
+			{
+				var topPrices = allRows
+					.OrderByDescending(r => r.Volume)
+					.Take(Rows)
+					.Select(r => r.Price)
+					.ToHashSet();
+
+				profileRows = allRows
+					.Where(r => topPrices.Contains(r.Price))
+					.OrderBy(r => r.Price)
+					.ToList();
+			}
+			else
+			{
+				profileRows = allRows;
 			}
 
 			CalculateValueArea();
