@@ -252,6 +252,56 @@ in State.SetDefaults if plots are intended
 For pure rendering indicators (no data series output), remove Values[] refs
 Models affected: AdaptiveVolumeProfile MiniMax v1
 
+ERROR 27:
+Issue: Namespace not properly set for NT8 indicator
+Symptom: Indicator doesn't compile or doesn't appear in NT8 indicator list
+Fix: Use namespace NinjaTrader.NinjaScript.Indicators
+WRONG: namespace MyCustomName { ... }
+CORRECT: namespace NinjaTrader.NinjaScript.Indicators { ... }
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 28:
+Issue: Using wrong namespace prefix causing System.Drawing references
+Symptom: Indicator uses System.Windows.Media.Brush instead of SharpDX
+for rendering, causing conflicts or incorrect rendering
+Fix: Use SharpDX.Direct2D1.SolidColorBrush for all rendering
+Never use System.Drawing namespace for NT8 indicators
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 29:
+Issue: ShowProfile toggle not working - rendering executes even when
+ShowProfile = false
+Symptom: Profile displays regardless of ShowProfile setting
+Fix: Add early return in OnRender if !ShowProfile
+Must be the FIRST check in OnRender, before any other validation
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 30:
+Issue: Value Area algorithm compares TOTAL remaining volume above vs 
+below instead of comparing NEXT adjacent level volume
+Symptom: Value Area expands incorrectly - may include small-volume 
+levels when large-volume levels exist on other side
+Fix: At each expansion step, compare ONLY the next adjacent level 
+on each side, not the total remaining:
+CORRECT:
+double nextAboveVol = aboveIndex < pricesAbove.Count ? 
+    pricesAbove[aboveIndex].Value : double.MaxValue;
+double nextBelowVol = belowIndex < pricesBelow.Count ? 
+    pricesBelow[belowIndex].Value : double.MaxValue;
+addAbove = nextAboveVol >= nextBelowVol;  // Compare NEXT level only
+WRONG:
+addAbove = aboveVolume >= belowVolume;  // Compares TOTAL remaining
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
+ERROR 31:
+Issue: Volume accumulating cumulatively instead of as delta per bar
+Symptom: Volume at each price level is inflated because Volume[0] 
+(bar's total volume) is added on each tick instead of incremental
+Fix: Track lastBarVolume and compute delta = Volume[0] - lastBarVolume
+Add only the delta to price levels, then update lastBarVolume
+NEVER add Volume[0] directly - it contains total bar volume not delta
+Models affected: AdaptiveVolumeProfile MiniMax v1
+
 ========================================
 END OF ERROR LOG
 ========================================
