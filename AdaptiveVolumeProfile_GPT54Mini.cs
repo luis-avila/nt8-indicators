@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.Windows.Media;
 using System.Xml.Serialization;
 using NinjaTrader.Cbi;
@@ -12,52 +11,46 @@ using NinjaTrader.Gui;
 using NinjaTrader.Gui.Chart;
 using NinjaTrader.Gui.Tools;
 using NinjaTrader.NinjaScript;
-using NinjaTrader.NinjaScript.DrawingTools;
 using SharpDX;
 using SharpDX.Direct2D1;
 #endregion
 
-// This namespace holds indicators in this folder and is required. Do not change it.
 namespace NinjaTrader.NinjaScript.Indicators
 {
 	public class AdaptiveVolumeProfile : Indicator
 	{
-		private const double ValueAreaPercentDefault = 0.70;
-		private SessionIterator sessionIterator;
-		private bool sessionInitialized;
-		private DateTime currentSessionBegin = Core.Globals.MinDate;
-		private Dictionary<double, double> sessionVolumeByPrice;
-		private double lastAccumulatedBarVolume;
-		private double lastProcessedPrice;
-		private int lastProcessedBar = -1;
-		private bool needsRebuild;
+		private struct PriceLevel
+		{
+			public double Price;
+			public double Volume;
+			public bool IsPoc;
+			public bool IsValueArea;
+		}
 
-		private SolidColorBrush pocBrushDx;
-		private SolidColorBrush valueAreaBrushDx;
-		private SolidColorBrush otherBrushDx;
+		private SessionIterator sessionIterator;
+		private Dictionary<double, double> volumeByPrice;
+		private bool sessionReady;
+		private int lastSessionBar = -1;
+		private SolidColorBrush pocDxBrush;
+		private SolidColorBrush valueAreaDxBrush;
+		private SolidColorBrush otherDxBrush;
 
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
 			{
-				Description = @"Real-time current-session volume profile rendered with SharpDX.";
+				Description = "Real-time current-session volume profile rendered on the right side of the price panel.";
 				Name = "AdaptiveVolumeProfile";
 				Calculate = Calculate.OnEachTick;
 				IsOverlay = true;
-				DisplayInDataBox = false;
 				DrawOnPricePanel = true;
-				DrawHorizontalGridLines = true;
-				DrawVerticalGridLines = true;
+				DisplayInDataBox = false;
 				PaintPriceMarkers = false;
-				ScaleJustification = ScaleJustification.Right;
 				IsSuspendedWhileInactive = true;
 				BarsRequiredToPlot = 0;
 				ShowProfile = true;
 				Rows = 48;
 				ValueAreaPercent = 70;
-				PocOpacity = 90;
-				ValueAreaOpacity = 70;
-				OtherOpacity = 45;
 				PocBrush = Brushes.Gold;
 				ValueAreaBrush = Brushes.DodgerBlue;
 				OtherBrush = Brushes.DimGray;
@@ -65,8 +58,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 			else if (State == State.DataLoaded)
 			{
 				sessionIterator = new SessionIterator(Bars);
-				sessionVolumeByPrice = new Dictionary<double, double>();
-				needsRebuild = true;
+				volumeByPrice = new Dictionary<double, double>();
+				sessionReady = true;
 			}
 			else if (State == State.Terminated)
 			{
@@ -76,47 +69,27 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 		protected override void OnBarUpdate()
 		{
-			if (CurrentBar < 0)
+			if (!sessionReady || CurrentBar < 0)
 				return;
 
-			try
+			if (Bars.IsFirstBarOfSession && CurrentBar != lastSessionBar)
 			{
-				if (Bars.IsFirstBarOfSession)
-					ResetSession();
-
-				double barVolume = Instrument.MasterInstrument.InstrumentType == InstrumentType.CryptoCurrency
-					? Core.Globals.ToCryptocurrencyVolume((long)Volume[0])
-					: Volume[0];
-
-				if (barVolume < 0)
-					barVolume = 0;
-
-				if (CurrentBar != lastProcessedBar)
-				{
-					lastProcessedBar = CurrentBar;
-					lastProcessedPrice = RoundToTick(Close[0]);
-					lastAccumulatedBarVolume = 0;
-				}
-
-				double delta = barVolume - lastAccumulatedBarVolume;
-				if (delta < 0)
-					delta = barVolume;
-				lastAccumulatedBarVolume = barVolume;
-
-				if (delta > 0)
-				{
-					double bucketPrice = RoundToTick(lastProcessedPrice);
-					if (!sessionVolumeByPrice.ContainsKey(bucketPrice))
-						sessionVolumeByPrice[bucketPrice] = 0;
-					sessionVolumeByPrice[bucketPrice] += delta;
-				}
-
-				needsRebuild = true;
+				volumeByPrice.Clear();
+				lastSessionBar = CurrentBar;
 			}
-			catch (Exception ex)
-			{
-				Log($"AdaptiveVolumeProfile OnBarUpdate error: {ex.Message}", LogLevel.Error);
-			}
+
+			double volume = Instrument.MasterInstrument.InstrumentType == InstrumentType.CryptoCurrency
+				? Core.Globals.ToCryptocurrencyVolume((long)Volume[0])
+				: Volume[0];
+
+			if (volume < 0)
+				volume = 0;
+
+			double price = Instrument.MasterInstrument.RoundToTickSize(Close[0]);
+			if (volumeByPrice.TryGetValue(price, out double existing))
+				volumeByPrice[price] = existing + volume;
+			else
+				volumeByPrice[price] = volume;
 		}
 
 		protected override void OnRenderTargetChanged()
@@ -126,40 +99,39 @@ namespace NinjaTrader.NinjaScript.Indicators
 			if (RenderTarget == null)
 				return;
 
-			pocBrushDx = PocBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
-			valueAreaBrushDx = ValueAreaBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
-			otherBrushDx = OtherBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
+			pocDxBrush = PocBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
+			valueAreaDxBrush = ValueAreaBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
+			otherDxBrush = OtherBrush.ToDxBrush(RenderTarget) as SolidColorBrush;
 		}
 
 		protected override void OnRender(ChartControl chartControl, ChartScale chartScale)
 		{
-			if (!ShowProfile || RenderTarget == null || ChartPanel == null || sessionVolumeByPrice == null || sessionVolumeByPrice.Count == 0)
+			if (!ShowProfile || RenderTarget == null || ChartPanel == null || volumeByPrice == null || volumeByPrice.Count == 0 || IsInHitTest)
 				return;
 
 			try
 			{
-				var profile = BuildProfile();
+				List<PriceLevel> profile = BuildProfile();
 				if (profile.Count == 0)
 					return;
 
 				float rightEdge = ChartPanel.X + ChartPanel.Width;
-				float maxBarWidth = Math.Max(20f, Math.Min(120f, ChartPanel.Width * 0.22f));
-				float topMargin = 2f;
-				float bottomMargin = 2f;
+				float maxBarWidth = Math.Max(20f, Math.Min(140f, ChartPanel.Width * 0.22f));
 
-				foreach (var level in profile)
+				foreach (PriceLevel level in profile)
 				{
-					float yTop = chartScale.GetYByValue(level.Price + TickSize * 0.5);
-					float yBottom = chartScale.GetYByValue(level.Price - TickSize * 0.5);
-					if (float.IsNaN(yTop) || float.IsNaN(yBottom))
+					float y1 = chartScale.GetYByValue(level.Price + TickSize * 0.5);
+					float y2 = chartScale.GetYByValue(level.Price - TickSize * 0.5);
+					if (float.IsNaN(y1) || float.IsNaN(y2))
 						continue;
 
-					float top = Math.Min(yTop, yBottom) + topMargin;
-					float height = Math.Max(1f, Math.Abs(yBottom - yTop) - topMargin - bottomMargin);
-					float width = (float)(level.Volume / profile.MaxVolume * maxBarWidth);
+					float top = Math.Min(y1, y2);
+					float height = Math.Max(1f, Math.Abs(y2 - y1) - 1f);
+					float width = (float)(level.Volume / GetMaxVolume(profile) * maxBarWidth);
 					float left = rightEdge - width;
-					var rect = new RectangleF(left, top, width, height);
-					var brush = level.IsPoc ? pocBrushDx : level.IsValueArea ? valueAreaBrushDx : otherBrushDx;
+					RectangleF rect = new RectangleF(left, top, width, height);
+
+					SolidColorBrush brush = level.IsPoc ? pocDxBrush : level.IsValueArea ? valueAreaDxBrush : otherDxBrush;
 					if (brush == null || brush.IsDisposed)
 						continue;
 
@@ -168,30 +140,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 			}
 			catch (Exception ex)
 			{
-				Log($"AdaptiveVolumeProfile OnRender error: {ex.Message}", LogLevel.Error);
+				Log($"AdaptiveVolumeProfile render error: {ex.Message}", LogLevel.Error);
 			}
 		}
 
-		private void ResetSession()
+		private List<PriceLevel> BuildProfile()
 		{
-			sessionVolumeByPrice.Clear();
-			lastAccumulatedBarVolume = 0;
-			lastProcessedBar = -1;
-			currentSessionBegin = Time[0];
-			needsRebuild = true;
-		}
-
-		private double RoundToTick(double price)
-		{
-			if (TickSize <= 0)
-				return price;
-			return Instrument.MasterInstrument.RoundToTickSize(price);
-		}
-
-		private List<ProfileLevel> BuildProfile()
-		{
-			if (sessionVolumeByPrice.Count == 0)
-				return new List<ProfileLevel>();
+			var levels = new List<PriceLevel>();
+			if (volumeByPrice.Count == 0)
+				return levels;
 
 			double minPrice = double.MaxValue;
 			double maxPrice = double.MinValue;
@@ -199,7 +156,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 			double maxVolume = 0;
 			double pocPrice = double.NaN;
 
-			foreach (var kvp in sessionVolumeByPrice)
+			foreach (KeyValuePair<double, double> kvp in volumeByPrice)
 			{
 				minPrice = Math.Min(minPrice, kvp.Key);
 				maxPrice = Math.Max(maxPrice, kvp.Key);
@@ -212,85 +169,100 @@ namespace NinjaTrader.NinjaScript.Indicators
 			}
 
 			if (maxVolume <= 0 || double.IsNaN(pocPrice))
-				return new List<ProfileLevel>();
+				return levels;
 
-			int desiredRows = Math.Max(1, Rows);
-			double step = Math.Max(TickSize, Math.Round((maxPrice - minPrice) / desiredRows / TickSize) * TickSize);
-			if (step <= 0)
-				step = TickSize;
-
-			var levels = new List<ProfileLevel>();
-			for (double p = minPrice; p <= maxPrice + (step * 0.5); p += step)
+			int rowCount = Math.Max(1, Rows);
+			double step = TickSize;
+			if (maxPrice > minPrice && rowCount > 0)
 			{
-				double bucketPrice = RoundToTick(p);
-				double volume = 0;
-				foreach (var kvp in sessionVolumeByPrice)
-				{
-					if (Math.Abs(kvp.Key - bucketPrice) < TickSize * 0.5)
-						volume += kvp.Value;
-				}
-				levels.Add(new ProfileLevel { Price = bucketPrice, Volume = volume });
+				double rawStep = (maxPrice - minPrice) / rowCount;
+				int ticks = (int)Math.Max(1, Math.Round(rawStep / TickSize));
+				step = Math.Max(TickSize, ticks * TickSize);
 			}
 
-			int pocIndex = -1;
-			for (int i = 0; i < levels.Count; i++)
-				if (Math.Abs(levels[i].Price - pocPrice) < TickSize * 0.5)
-				{
-					pocIndex = i;
-					break;
-				}
-			if (pocIndex < 0)
-				pocIndex = levels.FindIndex(l => l.Volume == maxVolume);
-			if (pocIndex < 0)
-				pocIndex = 0;
+			for (double price = minPrice; price <= maxPrice + (step * 0.5); price += step)
+			{
+				double bucketPrice = Instrument.MasterInstrument.RoundToTickSize(price);
+				double bucketVolume = 0;
 
-			double targetVolume = totalVolume * Math.Max(0.01, Math.Min(1.0, ValueAreaPercent / 100.0));
-			double vaVolume = levels[pocIndex].Volume;
-			levels[pocIndex].IsPoc = true;
-			levels[pocIndex].IsValueArea = true;
+				for (double inner = bucketPrice; inner < bucketPrice + step; inner += TickSize)
+				{
+					double normalized = Instrument.MasterInstrument.RoundToTickSize(inner);
+					if (volumeByPrice.TryGetValue(normalized, out double vol))
+						bucketVolume += vol;
+				}
+
+				levels.Add(new PriceLevel { Price = bucketPrice, Volume = bucketVolume });
+			}
+
+			int pocIndex = 0;
+			double currentMax = -1;
+			for (int i = 0; i < levels.Count; i++)
+			{
+				if (levels[i].Volume > currentMax)
+				{
+					currentMax = levels[i].Volume;
+					pocIndex = i;
+				}
+			}
+
+			double targetVolume = totalVolume * (ValueAreaPercent / 100.0);
+			double accumulated = levels[pocIndex].Volume;
+			levels[pocIndex] = new PriceLevel { Price = levels[pocIndex].Price, Volume = levels[pocIndex].Volume, IsPoc = true, IsValueArea = true };
 
 			int lower = pocIndex - 1;
 			int upper = pocIndex + 1;
-			while (vaVolume < targetVolume && (lower >= 0 || upper < levels.Count))
+			while (accumulated < targetVolume && (lower >= 0 || upper < levels.Count))
 			{
 				double lowerVol = lower >= 0 ? levels[lower].Volume : double.MinValue;
 				double upperVol = upper < levels.Count ? levels[upper].Volume : double.MinValue;
-				bool takeUpper = upperVol >= lowerVol;
-				if (takeUpper && upper < levels.Count)
+
+				if (upperVol >= lowerVol && upper < levels.Count)
 				{
-					levels[upper].IsValueArea = true;
-					vaVolume += levels[upper].Volume;
+					var lvl = levels[upper];
+					lvl.IsValueArea = true;
+					levels[upper] = lvl;
+					accumulated += lvl.Volume;
 					upper++;
 				}
 				else if (lower >= 0)
 				{
-					levels[lower].IsValueArea = true;
-					vaVolume += levels[lower].Volume;
+					var lvl = levels[lower];
+					lvl.IsValueArea = true;
+					levels[lower] = lvl;
+					accumulated += lvl.Volume;
 					lower--;
 				}
 				else
+				{
 					break;
+				}
 			}
 
-			return new List<ProfileLevel>(levels);
+			return levels;
+		}
+
+		private double GetMaxVolume(List<PriceLevel> profile)
+		{
+			double max = 0;
+			for (int i = 0; i < profile.Count; i++)
+				if (profile[i].Volume > max)
+					max = profile[i].Volume;
+			return max <= 0 ? 1 : max;
 		}
 
 		private void DisposeDxResources()
 		{
-			if (pocBrushDx != null && !pocBrushDx.IsDisposed) pocBrushDx.Dispose();
-			if (valueAreaBrushDx != null && !valueAreaBrushDx.IsDisposed) valueAreaBrushDx.Dispose();
-			if (otherBrushDx != null && !otherBrushDx.IsDisposed) otherBrushDx.Dispose();
-			pocBrushDx = null;
-			valueAreaBrushDx = null;
-			otherBrushDx = null;
-		}
+			if (pocDxBrush != null && !pocDxBrush.IsDisposed)
+				pocDxBrush.Dispose();
+			if (valueAreaDxBrush != null && !valueAreaDxBrush.IsDisposed)
+				valueAreaDxBrush.Dispose();
+			if (otherDxBrush != null && !otherDxBrush.IsDisposed)
+				otherDxBrush.Dispose();
 
-		private class ProfileLevel
-		{
-			public double Price;
-			public double Volume;
-			public bool IsPoc;
-			public bool IsValueArea;
+			pocDxBrush = null;
+			valueAreaDxBrush = null;
+			otherDxBrush = null;
 		}
 
 		#region Properties
@@ -299,7 +271,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 		public bool ShowProfile { get; set; }
 
 		[NinjaScriptProperty]
-		[Range(5, 500)]
+		[Range(1, 500)]
 		[Display(Name = "Rows", Order = 2, GroupName = "Parameters")]
 		public int Rows { get; set; }
 
@@ -315,8 +287,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 		[Browsable(false)]
 		public string PocBrushSerialize
 		{
-			get => Serialize.BrushToString(PocBrush);
-			set => PocBrush = Serialize.StringToBrush(value);
+			get { return Serialize.BrushToString(PocBrush); }
+			set { PocBrush = Serialize.StringToBrush(value); }
 		}
 
 		[XmlIgnore]
@@ -326,8 +298,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 		[Browsable(false)]
 		public string ValueAreaBrushSerialize
 		{
-			get => Serialize.BrushToString(ValueAreaBrush);
-			set => ValueAreaBrush = Serialize.StringToBrush(value);
+			get { return Serialize.BrushToString(ValueAreaBrush); }
+			set { ValueAreaBrush = Serialize.StringToBrush(value); }
 		}
 
 		[XmlIgnore]
@@ -337,8 +309,8 @@ namespace NinjaTrader.NinjaScript.Indicators
 		[Browsable(false)]
 		public string OtherBrushSerialize
 		{
-			get => Serialize.BrushToString(OtherBrush);
-			set => OtherBrush = Serialize.StringToBrush(value);
+			get { return Serialize.BrushToString(OtherBrush); }
+			set { OtherBrush = Serialize.StringToBrush(value); }
 		}
 		#endregion
 	}
