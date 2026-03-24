@@ -47,7 +47,6 @@ namespace NinjaTrader.NinjaScript.Indicators
 				DisplayInDataBox = false;
 				PaintPriceMarkers = false;
 				IsSuspendedWhileInactive = true;
-				BarsRequiredToPlot = 0;
 				ShowProfile = true;
 				Rows = 48;
 				ValueAreaPercent = 70;
@@ -78,10 +77,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 				lastSessionBar = CurrentBar;
 			}
 
-			double volume = Instrument.MasterInstrument.InstrumentType == InstrumentType.CryptoCurrency
-				? Core.Globals.ToCryptocurrencyVolume((long)Volume[0])
-				: Volume[0];
-
+			double volume = Volume[0];
 			if (volume < 0)
 				volume = 0;
 
@@ -115,6 +111,10 @@ namespace NinjaTrader.NinjaScript.Indicators
 				if (profile.Count == 0)
 					return;
 
+				double maxVolume = GetMaxVolume(profile);
+				if (maxVolume <= 0)
+					return;
+
 				float rightEdge = ChartPanel.X + ChartPanel.Width;
 				float maxBarWidth = Math.Max(20f, Math.Min(140f, ChartPanel.Width * 0.22f));
 
@@ -127,7 +127,7 @@ namespace NinjaTrader.NinjaScript.Indicators
 
 					float top = Math.Min(y1, y2);
 					float height = Math.Max(1f, Math.Abs(y2 - y1) - 1f);
-					float width = (float)(level.Volume / GetMaxVolume(profile) * maxBarWidth);
+					float width = (float)(level.Volume / maxVolume * maxBarWidth);
 					float left = rightEdge - width;
 					RectangleF rect = new RectangleF(left, top, width, height);
 
@@ -153,22 +153,15 @@ namespace NinjaTrader.NinjaScript.Indicators
 			double minPrice = double.MaxValue;
 			double maxPrice = double.MinValue;
 			double totalVolume = 0;
-			double maxVolume = 0;
-			double pocPrice = double.NaN;
 
 			foreach (KeyValuePair<double, double> kvp in volumeByPrice)
 			{
 				minPrice = Math.Min(minPrice, kvp.Key);
 				maxPrice = Math.Max(maxPrice, kvp.Key);
 				totalVolume += kvp.Value;
-				if (kvp.Value > maxVolume)
-				{
-					maxVolume = kvp.Value;
-					pocPrice = kvp.Key;
-				}
 			}
 
-			if (maxVolume <= 0 || double.IsNaN(pocPrice))
+			if (totalVolume <= 0 || maxPrice < minPrice)
 				return levels;
 
 			int rowCount = Math.Max(1, Rows);
